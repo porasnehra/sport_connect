@@ -4,7 +4,7 @@ import datetime
 
 # --- Backend API URL ---
 import os
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+BACKEND_URL = os.getenv("BACKEND_URL", "https://sport-connect-l1dq.onrender.com/")
 
 st.set_page_config(page_title="Sport Connect", page_icon="🏆", layout="wide")
 
