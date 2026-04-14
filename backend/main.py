@@ -2,6 +2,10 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
+import random
+from geopy.geocoders import Nominatim
+
+geolocator = Nominatim(user_agent="sport_connect_app")
 
 from . import models
 from .database import engine, get_db
@@ -23,6 +27,9 @@ class TournamentBase(BaseModel):
     tournament_date: str
     description: str
     is_verified: bool = True
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    source: str = "user"
 
 class TournamentCreate(TournamentBase):
     pass
@@ -62,6 +69,16 @@ def read_root():
 @app.post("/tournaments/", response_model=Tournament)
 def create_tournament(tournament: TournamentCreate, db: Session = Depends(get_db)):
     db_tournament = models.Tournament(**tournament.model_dump())
+    
+    if db_tournament.location and (db_tournament.latitude is None or db_tournament.longitude is None):
+        try:
+            loc = geolocator.geocode(db_tournament.location, timeout=5)
+            if loc:
+                db_tournament.latitude = loc.latitude
+                db_tournament.longitude = loc.longitude
+        except Exception as e:
+            print(f"Geocoding failed for {db_tournament.location}: {e}")
+            
     db.add(db_tournament)
     db.commit()
     db.refresh(db_tournament)
@@ -78,13 +95,50 @@ def create_tournament(tournament: TournamentCreate, db: Session = Depends(get_db
     return db_tournament
 
 @app.get("/tournaments/", response_model=List[Tournament])
-def read_tournaments(sport: Optional[str] = None, location: Optional[str] = None, db: Session = Depends(get_db)):
+def read_tournaments(sport: Optional[str] = None, location: Optional[str] = None, source: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(models.Tournament)
     if sport:
         query = query.filter(models.Tournament.sport.ilike(f"%{sport}%"))
     if location:
         query = query.filter(models.Tournament.location.ilike(f"%{location}%"))
+    if source:
+        query = query.filter(models.Tournament.source == source)
     return query.all()
+
+@app.post("/tournaments/mock-government")
+def mock_government_data(db: Session = Depends(get_db)):
+    count = 0
+    sports = ["Cricket", "Hockey", "Football", "Badminton", "Athletics"]
+    locations = ["New Delhi", "Mumbai", "Bangalore", "Chennai", "Kolkata"]
+    for i in range(3):
+        sport = random.choice(sports)
+        loc = random.choice(locations)
+        title = f"National {sport} Championship 2026"
+        exists = db.query(models.Tournament).filter(
+            models.Tournament.title == title,
+            models.Tournament.source == "government"
+        ).first()
+        if not exists:
+            lat, lng = None, None
+            try:
+                geo = geolocator.geocode(loc, timeout=5)
+                if geo:
+                    lat, lng = geo.latitude, geo.longitude
+            except:
+                pass
+            db_tourney = models.Tournament(
+                title=title, sport=sport, location=loc, entry_fee=0.0,
+                prize_pool="Govt Sponsored + Medal", organizer_name="Ministry of Sports",
+                contact_details="myas@gov.in", tournament_date="2026-05-15",
+                description="Official Government Sponsored Tournament. Highly verified platform.",
+                is_verified=True, source="government", latitude=lat, longitude=lng
+            )
+            db.add(db_tourney)
+            count += 1
+    if count > 0:
+        db.commit()
+        return {"message": f"Added {count} official government tournaments."}
+    return {"message": "Government data up to date."}
 
 @app.post("/register/")
 def register_for_tournament(registration: RegistrationCreate, db: Session = Depends(get_db)):
