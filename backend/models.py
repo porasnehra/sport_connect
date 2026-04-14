@@ -15,6 +15,9 @@ class Tournament(Base):
     tournament_date = Column(String)
     description = Column(Text)
     is_verified = Column(Boolean, default=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    source = Column(String, default="user")
 
 class Registration(Base):
     __tablename__ = "registrations"
