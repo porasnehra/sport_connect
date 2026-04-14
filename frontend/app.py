@@ -8,7 +8,7 @@ import streamlit.components.v1 as components
 geolocator = Nominatim(user_agent="sport_connect_frontend")
 
 # --- Backend API URL ---
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = "https://sport-connect-31f5.onrender.com"
 
 st.set_page_config(page_title="Sport Connect", page_icon="🏆", layout="wide")
 
