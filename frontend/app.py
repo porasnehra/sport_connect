@@ -1,10 +1,14 @@
 import streamlit as st
 import requests
 import datetime
+from geopy.geocoders import Nominatim
+from geopy.distance import geodesic
+import streamlit.components.v1 as components
+
+geolocator = Nominatim(user_agent="sport_connect_frontend")
 
 # --- Backend API URL ---
-import os
-BACKEND_URL = os.getenv("BACKEND_URL", "https://sport-connect-l1dq.onrender.com/")
+BACKEND_URL = "http://localhost:8000"
 
 st.set_page_config(page_title="Sport Connect", page_icon="🏆", layout="wide")
 
@@ -50,10 +54,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def fetch_tournaments(sport=None, location=None):
+def fetch_tournaments(sport=None, location=None, source=None):
     params = {}
     if sport: params['sport'] = sport
     if location: params['location'] = location
+    if source: params['source'] = source
     try:
         response = requests.get(f"{BACKEND_URL}/tournaments/", params=params)
         if response.status_code == 200:
@@ -106,68 +111,133 @@ if page == "🔍 Discover":
     st.title("Discover Local Tournaments")
     st.markdown("Find the best sports tournaments happening near you.")
     
-    col1, col2 = st.columns(2)
-    with col1:
-        search_sport = st.text_input("Filter by Sport (e.g., Cricket, Football)", placeholder="Enter sport...")
-    with col2:
-        search_location = st.text_input("Filter by Location", placeholder="Enter city or area...")
-        
-    with st.expander("🔔 Subscribe to new tournament alerts"):
-        with st.form("subscribe_form", clear_on_submit=True):
-            sub_col1, sub_col2, sub_col3 = st.columns(3)
-            with sub_col1:
-                sub_email = st.text_input("Email Address")
-            with sub_col2:
-                sub_sport = st.text_input("Sport (Optional)")
-            with sub_col3:
-                sub_location = st.text_input("Location (Optional)")
-            submit_sub = st.form_submit_button("Get Alerts")
-            if submit_sub:
-                if sub_email:
-                    if subscribe_notifications(sub_email, sub_sport, sub_location):
-                        st.success("Subscribed successfully! You'll be notified when new tournaments match your criteria.")
+    disc_tab1, disc_tab2, disc_tab3 = st.tabs(["🌍 All Tournaments", "🏛️ Government Official", "📍 Find Nearest"])
+    
+    with disc_tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            search_sport = st.text_input("Filter by Sport (e.g., Cricket, Football)", placeholder="Enter sport...")
+        with col2:
+            search_location = st.text_input("Filter by Location", placeholder="Enter city or area...")
+            
+        with st.expander("🔔 Subscribe to new tournament alerts"):
+            with st.form("subscribe_form", clear_on_submit=True):
+                sub_col1, sub_col2, sub_col3 = st.columns(3)
+                with sub_col1:
+                    sub_email = st.text_input("Email Address")
+                with sub_col2:
+                    sub_sport = st.text_input("Sport (Optional)")
+                with sub_col3:
+                    sub_location = st.text_input("Location (Optional)")
+                submit_sub = st.form_submit_button("Get Alerts")
+                if submit_sub:
+                    if sub_email:
+                        if subscribe_notifications(sub_email, sub_sport, sub_location):
+                            st.success("Subscribed successfully! You'll be notified when new tournaments match your criteria.")
+                        else:
+                            st.error("Failed to subscribe.")
                     else:
-                        st.error("Failed to subscribe.")
-                else:
-                    st.warning("Email is required to subscribe.")
+                        st.warning("Email is required to subscribe.")
 
-    st.markdown("---")
-    
-    tournaments = fetch_tournaments(search_sport, search_location)
-    
-    if not tournaments:
-        st.info("No tournaments found matching your criteria. Try dropping the filters or ask the AI Assistant!")
-    else:
-        for t in tournaments:
-            verified_badge = "✅ <span style='font-size:0.8rem; color:#4ade80;'>Verified</span>" if t.get('is_verified', True) else ""
-            with st.container():
-                st.markdown(f"""
-                <div class="tournament-card">
-                    <span class="sport-tag">{t.get('sport').upper()}</span>
+        st.markdown("---")
+        
+        tournaments = fetch_tournaments(search_sport, search_location)
+        
+        if not tournaments:
+            st.info("No tournaments found matching your criteria. Try dropping the filters or ask the AI Assistant!")
+        else:
+            for t in tournaments:
+                verified_badge = "✅ <span style='font-size:0.8rem; color:#4ade80;'>Verified</span>" if t.get('is_verified', True) else ""
+                with st.container():
+                    st.markdown(f'''
+                    <div class="tournament-card">
+                        <span class="sport-tag">{t.get('sport').upper()}</span>
+                        <h3 style="margin-top:10px;">{t.get('title')}</h3>
+                        <p class="location-text">📍 {t.get('location')} | 📅 {t.get('tournament_date')}</p>
+                        <p><b>Entry Fee:</b> ₹{t.get('entry_fee')} | <span class="prize-tag"><b>Prize Pool:</b> {t.get('prize_pool')}</span></p>
+                        <p><b>Organizer:</b> {t.get('organizer_name')} {verified_badge} 📞 {t.get('contact_details')}</p>
+                        <p style="color: #cbd5e1; font-size: 0.9rem;">{t.get('description')}</p>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                    
+                    with st.expander(f"Register for {t.get('title')}"):
+                        with st.form(key=f"reg_form_{t.get('id')}"):
+                            p_name = st.text_input("Your Name")
+                            p_email = st.text_input("Your Email")
+                            t_name = st.text_input("Team Name (Optional)")
+                            submit_reg = st.form_submit_button("Submit Registration")
+                            
+                            if submit_reg:
+                                if p_name and p_email:
+                                    success = register_player(t.get('id'), p_name, p_email, t_name)
+                                    if success:
+                                        st.success("Successfully registered! The organizer will contact you soon.")
+                                    else:
+                                        st.error("Registration failed. Please try again.")
+                                else:
+                                    st.warning("Name and Email are required!")
+
+    with disc_tab2:
+        st.subheader("🏛️ Official Government Sponsored Tournaments")
+        st.info("These are official tournaments organized by the Ministry of Youth Affairs and Sports. Authentic and highly verified.")
+        if st.button("Fetch Latest Government Data"):
+            try:
+                res = requests.post(f"{BACKEND_URL}/tournaments/mock-government")
+                if res.status_code == 200:
+                    st.success(res.json().get("message", "Success"))
+            except Exception as e:
+                st.error("Backend error.")
+        
+        govt_tourneys = fetch_tournaments(source="government")
+        if not govt_tourneys:
+            st.warning("No government tournaments found currently.")
+        else:
+            for t in govt_tourneys:
+                st.markdown(f'''
+                <div class="tournament-card" style="border: 2px solid #3b82f6;">
+                    <span class="sport-tag" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">🇮🇳 {t.get('sport').upper()}</span>
                     <h3 style="margin-top:10px;">{t.get('title')}</h3>
                     <p class="location-text">📍 {t.get('location')} | 📅 {t.get('tournament_date')}</p>
                     <p><b>Entry Fee:</b> ₹{t.get('entry_fee')} | <span class="prize-tag"><b>Prize Pool:</b> {t.get('prize_pool')}</span></p>
-                    <p><b>Organizer:</b> {t.get('organizer_name')} {verified_badge} 📞 {t.get('contact_details')}</p>
-                    <p style="color: #cbd5e1; font-size: 0.9rem;">{t.get('description')}</p>
+                    <p><b>Organizer:</b> {t.get('organizer_name')} ✅ <span style='color:#3b82f6;'>Government Verified</span></p>
                 </div>
-                """, unsafe_allow_html=True)
+                ''', unsafe_allow_html=True)
                 
-                with st.expander(f"Register for {t.get('title')}"):
-                    with st.form(key=f"reg_form_{t.get('id')}"):
-                        p_name = st.text_input("Your Name")
-                        p_email = st.text_input("Your Email")
-                        t_name = st.text_input("Team Name (Optional)")
-                        submit_reg = st.form_submit_button("Submit Registration")
-                        
-                        if submit_reg:
-                            if p_name and p_email:
-                                success = register_player(t.get('id'), p_name, p_email, t_name)
-                                if success:
-                                    st.success("Successfully registered! The organizer will contact you soon.")
-                                else:
-                                    st.error("Registration failed. Please try again.")
+    with disc_tab3:
+        st.subheader("📍 Find Nearest Tournament")
+        user_loc = st.text_input("Enter your current location (e.g., 'Andheri, Mumbai')", key="nearest_loc")
+        if st.button("Search Nearest"):
+            if user_loc:
+                with st.spinner("Finding your location and nearest tournaments..."):
+                    try:
+                        user_geo = geolocator.geocode(user_loc, timeout=5)
+                        if user_geo:
+                            user_coords = (user_geo.latitude, user_geo.longitude)
+                            
+                            all_t = fetch_tournaments()
+                            valid_t = [t for t in all_t if t.get('latitude') is not None and t.get('longitude') is not None]
+                            
+                            if not valid_t:
+                                st.error("No tournaments with location data available right now.")
                             else:
-                                st.warning("Name and Email are required!")
+                                nearest = min(valid_t, key=lambda t: geodesic(user_coords, (t['latitude'], t['longitude'])).km)
+                                dist = geodesic(user_coords, (nearest['latitude'], nearest['longitude'])).km
+                                
+                                st.success(f"Nearest tournament found: **{nearest['title']}** ({dist:.1f} km away)")
+                                
+                                map_loc_query = nearest.get('location').replace(" ", "+")
+                                map_html = f'''
+                                <iframe src="https://maps.google.com/maps?q={map_loc_query}&t=&z=13&ie=UTF8&iwloc=&output=embed" width="100%" height="400" frameborder="0" style="border:0;" allowfullscreen></iframe>
+                                '''
+                                components.html(map_html, height=450)
+                                st.markdown("Register or find more details in the **'All Tournaments'** tab!")
+                        else:
+                            st.error("Could not find that location. Please try adding more specific details (e.g., City, State).")
+                    except Exception as e:
+                        st.error(f"Geocoding error: {e}")
+            else:
+                st.warning("Please enter a location to search.")
+
 
 elif page == "🏗️ Organizer Dashboard":
     st.title("Organizer Dashboard")
